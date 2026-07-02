@@ -1,0 +1,4 @@
+node_modules/
+.tokesave-stats.json
+tokesave.config.json
+.agents/
