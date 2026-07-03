@@ -4,7 +4,7 @@
   "description": "The ultimate AI token-saving MCP middleware — compression, caching, injection shield, multi-server routing, and more.",
   "main": "src/index.js",
   "bin": {
-    "tokesave-mcp": "./src/index.js"
+    "tokesave-mcp": "src/index.js"
   },
   "scripts": {
     "start": "node src/index.js",
@@ -47,5 +47,11 @@
     "node": ">=18.0.0"
   },
   "author": "Irsyadmr354",
-  "license": "MIT"
+  "license": "MIT",
+  "files": [
+    "src/",
+    "SKILL.md",
+    "README.md",
+    "tokesave.config.json"
+  ]
 }
