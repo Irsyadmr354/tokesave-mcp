@@ -1,0 +1,51 @@
+{
+  "name": "tokesave-mcp",
+  "version": "1.0.0",
+  "description": "The ultimate AI token-saving MCP middleware — compression, caching, injection shield, multi-server routing, and more.",
+  "main": "src/index.js",
+  "bin": {
+    "tokesave-mcp": "./src/index.js"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "router": "node src/index.js router",
+    "marketplace": "node src/index.js marketplace"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "token-saving",
+    "compression",
+    "ai",
+    "llm",
+    "proxy",
+    "middleware",
+    "claude",
+    "gemini",
+    "cursor",
+    "prompt-injection",
+    "security"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Irsyadmr354/tokesave-mcp.git"
+  },
+  "homepage": "https://github.com/Irsyadmr354/tokesave-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/Irsyadmr354/tokesave-mcp/issues"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@xenova/transformers": "^2.17.2",
+    "bson": "^7.3.1",
+    "express": "^5.2.1",
+    "jimp": "^1.6.1",
+    "redis": "^6.1.0",
+    "terser": "^5.48.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "author": "Irsyadmr354",
+  "license": "MIT"
+}
