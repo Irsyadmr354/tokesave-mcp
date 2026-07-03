@@ -251,7 +251,7 @@ const tokesaveTools = [
       },
       {
         name: "read_function_body",
-        description: "USE THIS instead of reading an entire file when you only need one function or class. Extracts just the target function — saves 90%+ tokens on large files.",
+        description: "USE THIS instead of reading an entire file when you only need one function or class. Extracts just the target function — reads only what's needed, not the whole file.",
         inputSchema: {
           type: "object",
           properties: {
@@ -398,11 +398,11 @@ const tokesaveTools = [
       },
       {
         name: "grep_files",
-        description: "Search files for pattern, return only matching lines with context. Avoids reading full files. Huge token save vs grep+compress.",
+        description: "Search files for pattern, return only matching lines with context. Avoids reading full files. Scans up to 500 files, caps at 200 matches to prevent hang on large repos.",
         inputSchema: {
           type: "object",
           properties: {
-            pattern: { type: "string", description: "Search pattern (case-insensitive)" },
+            pattern: { type: "string", description: "Search pattern (case-insensitive substring)" },
             fileGlob: { type: "string", description: "File filter e.g. '*.js', '*.md' (default: '*')" },
             contextLines: { type: "number", description: "Lines of context around match (default: 2)" },
           },
@@ -717,10 +717,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { filePath, maxTokens = 500 } = request.params.arguments;
       try {
         const content = fs.readFileSync(filePath, 'utf8');
-        const targetChars = maxTokens * 4; // ~4 chars per token
+        const { estimateTokens } = require('./tokens');
+        const targetTokens = maxTokens;
 
         // If already fits, return as-is
-        if (content.length <= targetChars) {
+        if (estimateTokens(content) <= targetTokens) {
           return { content: [{ type: "text", text: content }] };
         }
 
@@ -729,21 +730,24 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const originalMode = compressor.mode;
         let result = content;
 
-        for (const mode of modes) {
-          compressor.setMode(mode);
-          result = await compressor.compressText(content, filePath);
-          if (result.length <= targetChars) break;
+        try {
+          for (const mode of modes) {
+            compressor.setMode(mode);
+            result = await compressor.compressText(content, filePath);
+            if (estimateTokens(result) <= targetTokens) break;
+          }
+        } finally {
+          compressor.setMode(originalMode);
         }
-
-        // Restore original mode
-        compressor.setMode(originalMode);
 
         // If still over budget after all modes, hard-truncate with notice
-        if (result.length > targetChars) {
-          result = result.slice(0, targetChars) + `\n\n[TRUNCATED: content exceeded ${maxTokens} token budget]`;
+        if (estimateTokens(result) > targetTokens) {
+          // Approximate chars for target tokens
+          const targetChars = Math.floor(targetTokens * 3.5);
+          result = result.slice(0, targetChars) + `\n\n[TRUNCATED: exceeded ${maxTokens} token budget]`;
         }
 
-        const usedTokens = Math.ceil(result.length / 4);
+        const usedTokens = estimateTokens(result);
         return {
           content: [{
             type: "text",

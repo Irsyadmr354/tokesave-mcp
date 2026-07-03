@@ -11,18 +11,18 @@ Call `auto_setup` tool FIRST in every new session. It prints current config and 
 
 ## Tool Routing (MANDATORY — no exceptions)
 
-| Instead of...             | Use this TokeSave tool     | Why                          |
-|---------------------------|----------------------------|------------------------------|
-| read any file             | `compress_file`            | cache + dedup + compression  |
-| read 2+ files             | `compress_batch`           | single call, concurrent      |
-| need only 1 function      | `read_function_body`       | 80–99% token reduction       |
-| search in files           | `grep_files`               | match+context, no full read  |
-| list directory            | `file_mtree`               | size+token estimate, no read |
-| specific line range       | `read_file_range`          | skip irrelevant lines        |
-| diff two files            | `diff_files`               | changed lines only           |
-| fetch any URL             | `compress_url`             | HTML strip + inject scan     |
-| long text (>200 words)    | `compress_text`            | lexical + structural compress|
-| understand a large file   | `summarize_file`           | auto-fits token budget       |
+| Instead of...             | Use this TokeSave tool     | Why                             |
+|---------------------------|----------------------------|---------------------------------|
+| read any file             | `compress_file`            | cache + dedup + compression     |
+| read 2+ files             | `compress_batch`           | single call, concurrent         |
+| need only 1 function      | `read_function_body`       | reads only target, skips rest   |
+| search in files           | `grep_files`               | match+context only, no full read|
+| list directory            | `file_mtree`               | size+token estimate, zero read  |
+| specific line range       | `read_file_range`          | skip irrelevant lines           |
+| diff two files            | `diff_files`               | changed lines only              |
+| fetch any URL             | `compress_url`             | HTML strip + inject scan        |
+| long text (>200 words)    | `compress_text`            | lexical + structural compress   |
+| understand a large file   | `summarize_file`           | auto-fits token budget          |
 
 ## Compression Levels
 

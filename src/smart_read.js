@@ -25,22 +25,33 @@ function matchesGlob(filename, glob) {
 
 function grepFiles(pattern, fileGlob, contextLines = 2) {
   const cwd = process.cwd();
-  const files = listFiles(cwd, fileGlob);
+  // FIX: cap total files scanned to prevent hang on large repos
+  const MAX_FILES = 500;
+  const MAX_MATCHES = 200;
+  const files = listFiles(cwd, fileGlob, MAX_FILES);
 
   let output = '';
   let totalMatches = 0;
 
   for (const file of files) {
+    if (totalMatches >= MAX_MATCHES) {
+      output += `\n[TRUNCATED: hit ${MAX_MATCHES} match limit. Use a more specific pattern or fileGlob.]\n`;
+      break;
+    }
     let content;
     try {
       content = fs.readFileSync(file, 'utf8');
     } catch {
       continue;
     }
+    // Skip files larger than 500KB — likely binary or generated
+    if (content.length > 500 * 1024) continue;
+
     const lines = content.split('\n');
     const matches = [];
 
     for (let i = 0; i < lines.length; i++) {
+      if (totalMatches >= MAX_MATCHES) break;
       if (lines[i].toLowerCase().includes(pattern.toLowerCase())) {
         const from = Math.max(0, i - contextLines);
         const to = Math.min(lines.length - 1, i + contextLines);
@@ -61,7 +72,7 @@ function grepFiles(pattern, fileGlob, contextLines = 2) {
   return `[GREP: ${totalMatches} matches in ${files.length} files for "${pattern}"]\n${output}`;
 }
 
-function listFiles(dir, glob) {
+function listFiles(dir, glob, maxFiles = 500) {
   const results = [];
   let entries;
   try {
@@ -71,13 +82,13 @@ function listFiles(dir, glob) {
   }
 
   for (const entry of entries) {
+    if (results.length >= maxFiles) break;
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
       if (!entry.name.startsWith('.') && entry.name !== 'node_modules') {
-        results.push(...listFiles(full, glob));
+        results.push(...listFiles(full, glob, maxFiles - results.length));
       }
     } else if (entry.isFile()) {
-      // BUG FIX #5: use proper glob matching
       if (matchesGlob(entry.name, glob)) {
         results.push(full);
       }

@@ -8,20 +8,28 @@ class JSONShredder {
   generateKeyMap(keys) {
     const map = {};
     const alphabet = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    // FIX: collect short keys first to reserve them, avoid collision with generated keys
+    const reservedValues = new Set(keys.filter(k => k.length <= 2));
     let idx = 0;
     for (const key of keys) {
       if (key.length <= 2) {
-        map[key] = key;
+        map[key] = key; // short keys kept as-is
         continue;
       }
+      // Generate a key that does NOT collide with any existing key or reserved value
       let newKey = '';
       let tempIdx = idx;
       do {
-        newKey = alphabet[tempIdx % alphabet.length] + newKey;
-        tempIdx = Math.floor(tempIdx / alphabet.length);
-      } while (tempIdx > 0);
+        newKey = '';
+        let ti = tempIdx;
+        do {
+          newKey = alphabet[ti % alphabet.length] + newKey;
+          ti = Math.floor(ti / alphabet.length);
+        } while (ti > 0);
+        tempIdx++;
+      } while (reservedValues.has(newKey) || Object.values(map).includes(newKey));
       map[key] = newKey;
-      idx++;
+      idx = tempIdx;
     }
     return map;
   }
