@@ -9,6 +9,7 @@ const {
 } = require("@modelcontextprotocol/sdk/types.js");
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const compressor = require('./compress');
 const stats = require('./stats');
 const proxy = require('./proxy');
@@ -30,34 +31,57 @@ const { startMarketplace } = require('./marketplace');
 const { Client } = require("@modelcontextprotocol/sdk/client/index.js");
 const { StdioClientTransport } = require("@modelcontextprotocol/sdk/client/stdio.js");
 
-// Load config if exists
+// Load config — priority: cwd → home dir → package default
+// FIX #3: user install global, cwd berbeda dari __dirname — harus cari di cwd dulu
 const configBase = path.resolve(__dirname, '..');
+
+function findConfig() {
+  // 1. cwd (project folder user saat ini)
+  const cwdConfig = path.join(process.cwd(), 'tokesave.config.json');
+  if (fs.existsSync(cwdConfig)) return cwdConfig;
+
+  // 2. home dir (~/.tokesave.config.json)
+  const homeConfig = path.join(os.homedir(), '.tokesave.config.json');
+  if (fs.existsSync(homeConfig)) return homeConfig;
+
+  // 3. package dir (bundled default config)
+  const pkgConfig = path.join(configBase, 'tokesave.config.json');
+  if (fs.existsSync(pkgConfig)) return pkgConfig;
+
+  return null;
+}
+
 function loadConfig() {
   try {
-    const configPath = path.join(configBase, 'tokesave.config.json');
-    if (!fs.existsSync(configPath)) return;
+    const configPath = findConfig();
+    if (!configPath) {
+      // FIX #3: auto-apply safe defaults even without config file
+      compressor.setRedactPII(true);
+      skeleton.enable();
+      adaptive.setMaxLevel('brutal');
+      console.error('[TokeSave] No config found — using built-in defaults (aggressive mode, redactPII, AST skeleton)');
+      return;
+    }
+    console.error(`[TokeSave] Config: ${configPath}`);
     const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
     if (config.mode) compressor.setMode(config.mode);
     if (config.customAbbreviations || config.customBrutalReplacements) {
       compressor.loadCustomAbbreviations(config.customAbbreviations, config.customBrutalReplacements);
     }
-    if (config.redactPII) compressor.setRedactPII(true);
+    if (config.redactPII !== false) compressor.setRedactPII(true); // default ON
     if (config.dedupThreshold) dedup.setThreshold(config.dedupThreshold);
     if (config.useTextRankDistillation) distill.enable();
-    if (config.useAstSkeleton) skeleton.enable();
+    if (config.useAstSkeleton !== false) skeleton.enable();       // default ON
     if (config.useAutoMinifier) { const golf = require('./golf'); golf.enable(); }
     if (config.useInfiniteMemory) {
       const memory = require('./memory');
       memory.enable().catch(() => {});
     }
     if (config.distillRatio) distill.setRatio(config.distillRatio);
-    if (config.maxAdaptiveLevel) {
-      adaptive.setMaxLevel(config.maxAdaptiveLevel);
-    }
-    // BUG FIX #13: pin adaptive floor to the configured starting mode
+    if (config.maxAdaptiveLevel) adaptive.setMaxLevel(config.maxAdaptiveLevel);
     if (config.mode) adaptive.setMinLevel(config.mode);
   } catch (e) {
-    console.error("Failed to load tokesave.config.json:", e.message);
+    console.error('[TokeSave] Failed to load config:', e.message);
   }
 }
 loadConfig();
@@ -69,11 +93,8 @@ const downstreamTools = [];
 
 async function initDownstreamServers() {
   try {
-    const configPath = path.join(configBase, 'tokesave.config.json');
-    if (!fs.existsSync(configPath)) {
-      console.error('[TokeSave] No config found at', configPath);
-      return;
-    }
+    const configPath = findConfig();
+    if (!configPath) return;
     const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
     const serversConfig = config.servers || {};
     if (Object.keys(serversConfig).length === 0) return;

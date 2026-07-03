@@ -1,5 +1,12 @@
 const crypto = require('crypto');
-const { createClient } = require('redis');
+
+// FIX #2: redis is optional — graceful fallback if not installed
+let createClient;
+try {
+  createClient = require('redis').createClient;
+} catch (_) {
+  createClient = null;
+}
 
 const MAX_LOCAL_CACHE = 100;
 
@@ -41,6 +48,10 @@ class CacheLayer {
 
   async connectRedis(url) {
     if (!url) return;
+    if (!createClient) {
+      console.error('[TokeSave] Redis requested but "redis" package not installed. Run: npm install redis');
+      return;
+    }
     try {
       this.redisClient = createClient({ url });
       this.redisClient.on('error', (err) => console.error('Redis Client Error', err));

@@ -4,7 +4,14 @@ const stats = require('./stats');
 let app = null;
 
 function startMarketplace(port = 3000) {
-  const express = require('express');
+  // FIX #2: express is optional
+  let express;
+  try {
+    express = require('express');
+  } catch (_) {
+    console.error('[TokeSave] Marketplace requires express: npm install express');
+    process.exit(1);
+  }
   app = express();
   app.use(express.json({ limit: '1mb' }));
 
