@@ -1,61 +1,66 @@
-// Math-based Text Extractor (TextRank approximation)
-// Extracts the most important sentences without AI (Lossless Extractive)
+// Math-based Text Extractor (TF-IDF sentence scoring)
 
 class DistillationEngine {
   constructor() {
     this.enabled = false;
-    this.ratio = 0.3; // Keep top 30% of sentences
+    this.ratio = 0.3;
   }
 
   enable() {
     this.enabled = true;
-    console.error("TextRank Pre-Distillation Engine Enabled.");
+    console.error("TextRank Pre-Distillation Engine Enabled (TF-IDF).");
   }
 
   setRatio(ratio) {
     this.ratio = ratio;
   }
 
+  _tokenize(sentence) {
+    return (sentence.toLowerCase().match(/\b\w+\b/g) || []);
+  }
+
   extract(text) {
     if (!this.enabled || !text || text.length < 500) return text;
 
-    // 1. Split into sentences
     const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
     if (sentences.length < 5) return text;
 
-    // 2. Tokenize and calculate word frequencies (TF)
-    const wordFreq = {};
     const stopWords = new Set(['the','a','an','and','or','but','is','are','was','were','of','to','in','for','with','on','at','from','by']);
-    
-    sentences.forEach(sentence => {
-      const words = sentence.toLowerCase().match(/\b\w+\b/g) || [];
-      words.forEach(word => {
-        if (!stopWords.has(word)) {
-          wordFreq[word] = (wordFreq[word] || 0) + 1;
-        }
-      });
-    });
+    const totalSentences = sentences.length;
 
-    // 3. Score sentences based on word frequencies
+    const sentenceWords = sentences.map(s => this._tokenize(s).filter(w => !stopWords.has(w)));
+
+    const docFreq = {};
+    for (const words of sentenceWords) {
+      const seen = new Set(words);
+      for (const word of seen) {
+        docFreq[word] = (docFreq[word] || 0) + 1;
+      }
+    }
+
+    const tfidf = (word, words) => {
+      const tf = words.filter(w => w === word).length;
+      if (tf === 0) return 0;
+      const df = docFreq[word] || 1;
+      const idf = Math.log(totalSentences / df);
+      return tf * idf;
+    };
+
     const scoredSentences = sentences.map((sentence, index) => {
-      const words = sentence.toLowerCase().match(/\b\w+\b/g) || [];
+      const words = sentenceWords[index];
       let score = 0;
-      words.forEach(word => {
-        if (wordFreq[word]) score += wordFreq[word];
-      });
+      const uniqueWords = [...new Set(words)];
+      for (const word of uniqueWords) {
+        score += tfidf(word, words);
+      }
       return { sentence, score, index };
     });
 
-    // 4. Sort by score and pick top K
     scoredSentences.sort((a, b) => b.score - a.score);
     const topK = Math.max(1, Math.ceil(sentences.length * this.ratio));
     const selected = scoredSentences.slice(0, topK);
-
-    // 5. Restore original order
     selected.sort((a, b) => a.index - b.index);
 
-    // Return only the distilled text — no prefix injected into the content
-    // (prefix would corrupt downstream compression and inflate stats)
     return selected.map(s => s.sentence.trim()).join(' ');
   }
 }

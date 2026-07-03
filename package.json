@@ -1,6 +1,6 @@
 {
   "name": "tokesave-mcp",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "The ultimate AI token-saving MCP middleware — compression, caching, injection shield, multi-server routing, and more.",
   "main": "src/index.js",
   "bin": {

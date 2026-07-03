@@ -1,25 +1,23 @@
 // A pure JS Infinite Memory (RAG) module using @xenova/transformers
 
-const MAX_VECTORS = 300; // Bug #15 fix: limit memory size
+const MAX_VECTORS = 300;
 
 class InfiniteMemoryDB {
   constructor() {
     this.enabled = false;
     this.extractor = null;
-    this.db = []; // Array of { text, vector }
+    this.db = [];
   }
 
   async enable() {
     this.enabled = true;
     console.error("Infinite Memory RAG DB Enabled. Initializing Xenova Transformers...");
     try {
-      // Dynamic import to avoid loading transformers if not used
       const { pipeline, env } = await import('@xenova/transformers');
-      // Disable local model check to allow downloading if not present
-      env.allowLocalModels = false; 
-      
+      env.allowLocalModels = false;
+
       this.extractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
-        quantized: true // Keeps the model tiny (~22MB)
+        quantized: true
       });
       console.error("Xenova Vector Model loaded.");
     } catch (e) {
@@ -48,12 +46,10 @@ class InfiniteMemoryDB {
 
   async store(text) {
     if (!this.enabled || !text) return;
-    // Don't embed tiny chunks
     if (text.length < 50) return;
-    
+
     const vector = await this.embed(text);
     if (vector) {
-      // Bug #15 fix: evict oldest if over limit
       if (this.db.length >= MAX_VECTORS) {
         this.db.shift();
       }
@@ -61,9 +57,45 @@ class InfiniteMemoryDB {
     }
   }
 
+  async summarizeAndStore(text, compressor) {
+    if (!text) return { stored: false, reason: 'empty text' };
+
+    let summary = text;
+    if (compressor) {
+      summary = await compressor.compressText(text);
+    } else if (text.length > 2000) {
+      const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
+      const keep = Math.max(1, Math.ceil(sentences.length * 0.3));
+      summary = sentences.slice(0, keep).join(' ');
+    }
+
+    const label = `[OUTPUT_SUMMARY ${new Date().toISOString()}] `;
+    const storedText = label + summary;
+
+    if (this.enabled) {
+      await this.store(storedText);
+      return {
+        stored: true,
+        inMemory: true,
+        originalLength: text.length,
+        summaryLength: summary.length,
+        summary: storedText,
+      };
+    }
+
+    return {
+      stored: false,
+      inMemory: false,
+      originalLength: text.length,
+      summaryLength: summary.length,
+      summary: storedText,
+      reason: 'Vector memory disabled — summary returned but not indexed. Enable useInfiniteMemory in config.',
+    };
+  }
+
   async recall(queryText, topK = 1) {
     if (!this.enabled || this.db.length === 0) return "Memory is empty.";
-    
+
     const queryVector = await this.embed(queryText);
     if (!queryVector) return "Failed to generate query vector.";
 
@@ -73,7 +105,7 @@ class InfiniteMemoryDB {
     }));
 
     scored.sort((a, b) => b.score - a.score);
-    
+
     const results = scored.slice(0, topK);
     return results.map(r => `[Similarity: ${(r.score * 100).toFixed(1)}%] ${r.text}`).join('\n\n');
   }

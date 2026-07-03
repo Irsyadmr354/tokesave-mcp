@@ -1,6 +1,8 @@
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
 
-// FIX #2: redis is optional — graceful fallback if not installed
 let createClient;
 try {
   createClient = require('redis').createClient;
@@ -9,9 +11,10 @@ try {
 }
 
 const MAX_LOCAL_CACHE = 100;
+const MAX_PERSIST_BYTES = 10 * 1024 * 1024;
+const DEFAULT_CACHE_FILE = path.join(os.homedir(), '.tokesave-cache.json');
 
 class LRUCache {
-  // BUG FIX #21: proper LRU — move entry to end on access, evict from front
   constructor(maxSize) {
     this.maxSize = maxSize;
     this.map = new Map();
@@ -19,7 +22,6 @@ class LRUCache {
 
   get(key) {
     if (!this.map.has(key)) return undefined;
-    // Move to end (most recently used)
     const value = this.map.get(key);
     this.map.delete(key);
     this.map.set(key, value);
@@ -29,10 +31,13 @@ class LRUCache {
   set(key, value) {
     if (this.map.has(key)) this.map.delete(key);
     else if (this.map.size >= this.maxSize) {
-      // Evict least recently used (first entry)
       this.map.delete(this.map.keys().next().value);
     }
     this.map.set(key, value);
+  }
+
+  entries() {
+    return this.map.entries();
   }
 
   get size() { return this.map.size; }
@@ -44,6 +49,49 @@ class CacheLayer {
     this.redisClient = null;
     this.useRedis = false;
     this.pendingRequests = new Map();
+    this.persistEnabled = false;
+    this.cacheFilePath = DEFAULT_CACHE_FILE;
+  }
+
+  enablePersistence(filePath) {
+    this.persistEnabled = true;
+    if (filePath) this.cacheFilePath = filePath;
+    this.loadFromDisk();
+  }
+
+  loadFromDisk() {
+    if (!this.persistEnabled || !fs.existsSync(this.cacheFilePath)) return;
+    try {
+      const raw = fs.readFileSync(this.cacheFilePath, 'utf8');
+      if (raw.length > MAX_PERSIST_BYTES) {
+        console.error('[TokeSave] Cache file exceeds 10MB limit — skipping load');
+        return;
+      }
+      const data = JSON.parse(raw);
+      const entries = data.entries || [];
+      for (const [key, value] of entries) {
+        this.localCache.set(key, value);
+      }
+      console.error(`[TokeSave] Loaded ${entries.length} cache entries from disk`);
+    } catch (e) {
+      console.error('[TokeSave] Failed to load cache from disk:', e.message);
+    }
+  }
+
+  saveToDisk() {
+    if (!this.persistEnabled) return;
+    try {
+      const entries = [...this.localCache.entries()];
+      const payload = JSON.stringify({ entries, savedAt: new Date().toISOString() });
+      if (payload.length > MAX_PERSIST_BYTES) {
+        const trimmed = entries.slice(-Math.floor(entries.length / 2));
+        fs.writeFileSync(this.cacheFilePath, JSON.stringify({ entries: trimmed, savedAt: new Date().toISOString() }), 'utf8');
+      } else {
+        fs.writeFileSync(this.cacheFilePath, payload, 'utf8');
+      }
+    } catch (e) {
+      console.error('[TokeSave] Failed to save cache to disk:', e.message);
+    }
   }
 
   async connectRedis(url) {
@@ -74,9 +122,7 @@ class CacheLayer {
       try {
         const data = await this.redisClient.get(hash);
         if (data) return JSON.parse(data);
-      } catch (e) {
-        // Fallback to local on Redis error
-      }
+      } catch (_) {}
     }
     return this.localCache.get(hash) ?? null;
   }
@@ -86,12 +132,15 @@ class CacheLayer {
       try {
         await this.redisClient.set(hash, JSON.stringify(response), { EX: 86400 });
         return;
-      } catch (e) {
-        // Fallback to local
-      }
+      } catch (_) {}
     }
     this.localCache.set(hash, response);
   }
 }
 
-module.exports = new CacheLayer();
+const instance = new CacheLayer();
+module.exports = instance;
+
+process.on('exit', () => instance.saveToDisk());
+process.on('SIGINT', () => { instance.saveToDisk(); });
+process.on('SIGTERM', () => { instance.saveToDisk(); });

@@ -27,6 +27,7 @@ const { fetchUrl } = require('./fetcher');
 const htmlShredder = require('./html_shredder');
 const adaptive = require('./adaptive');
 const cache = require('./cache');
+const configGenerator = require('./config_generator');
 const { startMarketplace } = require('./marketplace');
 const { Client } = require("@modelcontextprotocol/sdk/client/index.js");
 const { StdioClientTransport } = require("@modelcontextprotocol/sdk/client/stdio.js");
@@ -80,6 +81,11 @@ function loadConfig() {
     if (config.distillRatio) distill.setRatio(config.distillRatio);
     if (config.maxAdaptiveLevel) adaptive.setMaxLevel(config.maxAdaptiveLevel);
     if (config.mode) adaptive.setMinLevel(config.mode);
+    if (config.contextPressure) {
+      adaptive.setPressureThresholds(config.contextPressure.alertThreshold, config.contextPressure.criticalThreshold);
+    }
+    if (config.persistCache) cache.enablePersistence(config.cacheFilePath);
+    if (config.redisUrl) cache.connectRedis(config.redisUrl).catch(() => {});
   } catch (e) {
     console.error('[TokeSave] Failed to load config:', e.message);
   }
@@ -431,6 +437,40 @@ const tokesaveTools = [
             dirPath: { type: "string", description: "Directory path (default: cwd)" },
             maxDepth: { type: "number", description: "Max depth (default: 3)" },
           },
+        },
+      },
+      {
+        name: "generate_proxy_config",
+        description: "Detect existing MCP servers from Cursor/Claude/Kiro configs and generate tokesave.config.json with servers:{} auto-filled. Prints instructions for updating mcp.json.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            writeFile: { type: "boolean", description: "Write config to ~/.tokesave.config.json (default: true)" },
+            configPath: { type: "string", description: "Optional custom output path for tokesave.config.json" },
+          },
+        },
+      },
+      {
+        name: "check_context_pressure",
+        description: "Check session context window pressure based on total tokens processed. Returns recommended compression mode and auto-escalates if pressure is high.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            autoEscalate: { type: "boolean", description: "Auto-apply recommended mode (default: true)" },
+          },
+        },
+      },
+      {
+        name: "compress_output",
+        description: "Compress a long AI response for storage/reference in multi-turn conversations. Optionally stores compressed summary in vector memory for later recall.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            text: { type: "string", description: "AI response text to compress" },
+            storeInMemory: { type: "boolean", description: "Store compressed summary in vector memory (default: true if memory enabled)" },
+            label: { type: "string", description: "Optional label/tag for this output summary" },
+          },
+          required: ["text"],
         },
       },
 ];
@@ -939,6 +979,71 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return { content: [{ type: "text", text: result }] };
       } catch (e) {
         return { content: [{ type: "text", text: `mtree error: ${e.message}` }], isError: true };
+      }
+    }
+
+    case "generate_proxy_config": {
+      const { writeFile = true, configPath } = request.params.arguments || {};
+      try {
+        const result = configGenerator.generateProxyConfig({ writeFile, configPath });
+        return { content: [{ type: "text", text: result.summary }] };
+      } catch (e) {
+        return { content: [{ type: "text", text: `Config generation error: ${e.message}` }], isError: true };
+      }
+    }
+
+    case "check_context_pressure": {
+      const { autoEscalate = true } = request.params.arguments || {};
+      const pressure = adaptive.checkContextPressure(compressor.totalInputTokens);
+      let modeNote = '';
+      if (autoEscalate && pressure.recommendedMode !== compressor.mode) {
+        const prev = compressor.mode;
+        compressor.setMode(pressure.recommendedMode);
+        modeNote = `\nAuto-escalated: ${prev} → ${compressor.mode}`;
+      }
+      const lines = [
+        `Context Pressure Report`,
+        `─────────────────────────`,
+        `Total input tokens:  ${pressure.totalInputTokens}`,
+        `Alert threshold:     ${pressure.alertThreshold} (${pressure.alertPercent}%)`,
+        `Critical threshold:  ${pressure.criticalThreshold} (${pressure.criticalPercent}%)`,
+        `Pressure level:      ${pressure.pressureLevel}`,
+        `Current mode:        ${compressor.mode}`,
+        `Recommended mode:    ${pressure.recommendedMode}`,
+        modeNote,
+      ].filter(Boolean).join('\n');
+      return { content: [{ type: "text", text: lines }] };
+    }
+
+    case "compress_output": {
+      const memory = require('./memory');
+      const { text, storeInMemory, label } = request.params.arguments;
+      try {
+        const shouldStore = storeInMemory !== false;
+        const compressed = await compressor.compressText(text);
+        const { estimateTokens } = require('./tokens');
+        const origTokens = estimateTokens(text);
+        const compTokens = estimateTokens(compressed);
+
+        let storeNote = '';
+        if (shouldStore) {
+          const toStore = label ? `[${label}] ${compressed}` : compressed;
+          const storeResult = await memory.summarizeAndStore(toStore, null);
+          storeNote = storeResult.inMemory
+            ? '[Stored in vector memory]'
+            : (storeResult.reason || '[Not stored — memory disabled]');
+        }
+
+        const header = [
+          `[OUTPUT COMPRESSED: ${origTokens} → ${compTokens} tokens (${((1 - compTokens / Math.max(origTokens, 1)) * 100).toFixed(1)}% saved)]`,
+          storeNote,
+        ].filter(Boolean).join('\n');
+
+        return {
+          content: [{ type: "text", text: `${header}\n\n${compressed}` }],
+        };
+      } catch (e) {
+        return { content: [{ type: "text", text: `compress_output error: ${e.message}` }], isError: true };
       }
     }
 
